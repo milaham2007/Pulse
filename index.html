@@ -520,14 +520,17 @@
             </div>
         </div>
 
-        <!-- Мини-анатомия -->
-        <div class="anatomy-preview" id="anatomyPreview" onclick="switchTab('tab-habits')">
+       <!-- Мини-анатомия РАСКРЫВАЮЩАЯСЯ -->
+        <div class="anatomy-preview" id="anatomyPreview" onclick="toggleAnatomyExpand()" style="cursor:pointer;">
             <span class="anatomy-icon">🧠</span>
             <div class="anatomy-info">
                 <div class="anatomy-topic" id="anatomyTopicPreview">Тема дня</div>
                 <div class="anatomy-repeat" id="anatomyRepeatPreview">Повтор: —</div>
             </div>
-            <span style="color:var(--pink); font-size:18px;">→</span>
+            <span id="anatomyExpandArrow" style="color:var(--pink); font-size:18px; transition:transform 0.3s;">▶</span>
+        </div>
+        <div id="anatomyExpandable" style="display:none; background:var(--surface); border-radius:0 0 var(--radius) var(--radius); padding:0 16px 12px; margin-top:-8px; margin-bottom:10px; box-shadow:var(--shadow);">
+            <div id="anatomyDetailList"></div>
         </div>
 
         <!-- Пузырь Пантеры -->
@@ -1599,6 +1602,194 @@
             saveData();
             if (currentTab === 'tab-home') renderAll();
         }, 60000);
+        // ============ FIX: ИСПРАВЛЕНИЕ СОХРАНЕНИЯ ИМЕНИ ============
+(function() {
+    var savedName = localStorage.getItem('pulse_final_v2_name');
+    if (savedName) {
+        appData.name = savedName;
+        var nameInput = document.getElementById('nameInput');
+        if (nameInput) nameInput.value = savedName;
+    }
+    var nameInput = document.getElementById('nameInput');
+    if (nameInput) {
+        var originalSave = saveName;
+        saveName = function() {
+            var newName = nameInput.value || 'Студент-медик';
+            appData.name = newName;
+            localStorage.setItem('pulse_final_v2_name', newName);
+            saveData();
+        };
+        nameInput.addEventListener('change', function() {
+            var newName = this.value || 'Студент-медик';
+            appData.name = newName;
+            localStorage.setItem('pulse_final_v2_name', newName);
+            saveData();
+        });
+    }
+    // ============ БЛОК АНАТОМИИ: ТЕМЫ И РАСКРЫВАЮЩИЙСЯ СПИСОК ============
+
+// Полный список тем по дням (май 2026)
+var ANATOMY_SCHEDULE = {
+    '2026-05-01': 'Ротовая полость, зубы, лицо',
+    '2026-05-02': 'Язык, слюнные железы, глотка',
+    '2026-05-03': 'Пищевод и желудок',
+    '2026-05-04': 'Тонкая кишка и ДПК',
+    '2026-05-05': 'Толстая кишка (вся)',
+    '2026-05-06': 'Печень и желчные пути',
+    '2026-05-07': 'Поджелудочная и брюшина',
+    '2026-05-08': 'Гортань',
+    '2026-05-09': 'Нос, пазухи, трахея, бронхи',
+    '2026-05-10': 'Лёгкие',
+    '2026-05-11': 'Мочевая система',
+    '2026-05-12': 'Половая система',
+    '2026-05-13': 'Сердце: камеры, клапаны, перикард',
+    '2026-05-14': 'Проводящая система и сосуды сердца',
+    '2026-05-15': 'Аорта и дуга',
+    '2026-05-16': 'Сонные артерии',
+    '2026-05-17': 'Подключичная → артерии руки',
+    '2026-05-18': 'Грудная и брюшная аорта',
+    '2026-05-19': 'Артерии таза и ноги',
+    '2026-05-20': 'Венозная система (вся) + воротная вена',
+    '2026-05-21': 'Гипофиз, эпифиз, гипоталамус',
+    '2026-05-22': 'Щитовидная, паращитовидные, тимус',
+    '2026-05-23': 'Надпочечники, эндокринная часть ПЖ и гонад',
+    '2026-05-24': 'Лимфатическая система (вся)',
+    '2026-05-25': '⚡ ТОЛЬКО БИЛЕТЫ'
+};
+
+// Получить тему по дате
+function getAnatomyTopicByDate(date) {
+    var key = getDateKey(date);
+    if (ANATOMY_SCHEDULE[key]) return ANATOMY_SCHEDULE[key];
+    // До 1 мая или после 25 мая
+    if (date < new Date(2026, 4, 1)) return null;
+    return '⚡ ТОЛЬКО БИЛЕТЫ';
+}
+
+// Получить список тем для повторения: новая + (-1, -3, -7 дней)
+function getAnatomyReviewList() {
+    var today = new Date();
+    var list = [];
+    
+    // Новая тема дня
+    var newTopic = getAnatomyTopicByDate(today);
+    if (newTopic) {
+        list.push({ label: '🆕 Новая тема', topic: newTopic, day: 'сегодня' });
+    }
+    
+    // Темы для повторения
+    var offsets = [-1, -3, -7];
+    var dayNames = ['вчера', '3 дня назад', '7 дней назад'];
+    
+    for (var i = 0; i < offsets.length; i++) {
+        var d = new Date(today.getTime() + offsets[i] * 86400000);
+        var topic = getAnatomyTopicByDate(d);
+        if (topic) {
+            list.push({ label: '🔄 Повтор (' + dayNames[i] + ')', topic: topic, day: getDateKey(d) });
+        }
+    }
+    
+    return list;
+}
+
+// Создать или обновить раскрывающийся блок на главной
+function buildAnatomyExpandable() {
+    var container = document.getElementById('anatomyExpandable');
+    if (!container) return;
+    
+    var list = getAnatomyReviewList();
+    var topicEl = document.getElementById('anatomyTopicPreview');
+    var repeatEl = document.getElementById('anatomyRepeatPreview');
+    
+    // Обновляем превью
+    if (topicEl && list.length > 0) {
+        topicEl.textContent = '🧠 ' + list[0].topic;
+    }
+    if (repeatEl) {
+        var repeats = list.filter(function(item) { return item.label.indexOf('Повтор') === 0; });
+        if (repeats.length > 0) {
+            repeatEl.textContent = 'Повтор: ' + repeats.map(function(r) { return r.topic; }).join(' • ');
+        } else {
+            repeatEl.textContent = 'Нет тем для повторения';
+        }
+    }
+    
+    // Заполняем раскрывающийся список
+    var listContainer = document.getElementById('anatomyDetailList');
+    if (listContainer) {
+        var html = '';
+        if (list.length === 0) {
+            html = '<div style="padding:12px; color:var(--text-muted); font-size:13px;">⚡ Сегодня только работа по билетам. Повторяй слабые места.</div>';
+        } else {
+            for (var j = 0; j < list.length; j++) {
+                var item = list[j];
+                var isTodayRepeat = appData.anatomyReviewed && appData.anatomyReviewed[getTodayKey()] && appData.anatomyReviewed[getTodayKey()].indexOf(item.topic) >= 0;
+                html += '<div style="display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--border); font-size:13px; cursor:pointer;" onclick="toggleAnatomyReview(\'' + item.topic.replace(/'/g, "\\'") + '\')">';
+                html += '<span style="font-size:10px; color:var(--text-muted); min-width:28px;">' + (isTodayRepeat ? '✅' : '⬜') + '</span>';
+                html += '<span style="font-weight:600; min-width:70px;">' + item.label + '</span>';
+                html += '<span style="flex:1; ' + (isTodayRepeat ? 'text-decoration:line-through; color:var(--text-muted);' : '') + '">' + item.topic + '</span>';
+                html += '</div>';
+            }
+        }
+        listContainer.innerHTML = html;
+    }
+}
+
+// Отметить тему как повторенную
+function toggleAnatomyReview(topic) {
+    var key = getTodayKey();
+    if (!appData.anatomyReviewed) appData.anatomyReviewed = {};
+    if (!appData.anatomyReviewed[key]) appData.anatomyReviewed[key] = [];
+    
+    var idx = appData.anatomyReviewed[key].indexOf(topic);
+    if (idx >= 0) {
+        appData.anatomyReviewed[key].splice(idx, 1);
+    } else {
+        appData.anatomyReviewed[key].push(topic);
+    }
+    
+    // Если повторены все темы на сегодня — отметить анатомию выполненной
+    var list = getAnatomyReviewList();
+    var allReviewed = true;
+    for (var i = 0; i < list.length; i++) {
+        if (appData.anatomyReviewed[key].indexOf(list[i].topic) < 0) {
+            allReviewed = false;
+            break;
+        }
+    }
+    
+    if (allReviewed && list.length > 0) {
+        if (!isHabitDone('anatomy')) toggleHabit('anatomy');
+    }
+    
+    saveData();
+    buildAnatomyExpandable();
+    renderRing();
+    updateMainPageWidgets();
+}
+
+// Добавить недостающие поля в defaults
+(function() {
+    var defaults = getDefaultData;
+    getDefaultData = function() {
+        var d = defaults();
+        if (!d.anatomyReviewed) d.anatomyReviewed = {};
+        return d;
+    };
+})();
+    // ============ РАСКРЫТИЕ/СКРЫТИЕ БЛОКА АНАТОМИИ ============
+function toggleAnatomyExpand() {
+    var block = document.getElementById('anatomyExpandable');
+    var arrow = document.getElementById('anatomyExpandArrow');
+    if (block.style.display === 'none') {
+        block.style.display = 'block';
+        arrow.style.transform = 'rotate(90deg)';
+        buildAnatomyExpandable();
+    } else {
+        block.style.display = 'none';
+        arrow.style.transform = 'rotate(0deg)';
+    }
+}
     </script>
 </body>
 </html>
